@@ -2,25 +2,6 @@ AV.init({
   appId: 'ozewwcwsyq92g2hommuxqrqzg6847wgl8dtrac6suxzko333',
   appKey: 'ni0kwg7h8hwtz6a7dw9ipr7ayk989zo5y8t0sn5gjiel6uav',
 })
-var realtime = new AV.Realtime({
-  appId: 'ozewwcwsyq92g2hommuxqrqzg6847wgl8dtrac6suxzko333',
-})
-var LiveReload = {
-  client: null,
-  logout: function() {
-    if (this.client) {
-      this.client.close()
-      this.client = null;
-    }
-  },
-  login: function(clientId) {
-    if (this.client && this.client.id === clientId) return Promise.resolve(this.client)
-    return realtime.createIMClient(clientId).then(function(client) {
-      this.client = client
-      return client
-    }.bind(this))
-  }
-}
 
 var Todo = AV.Object.extend('Todo')
 
@@ -38,6 +19,32 @@ var filters = {
     return todos.filter(function (todo) {
       return todo.done
     })
+  }
+}
+
+var bind = (subscription, initialStats, onChange) => {
+  let stats = [...initialStats]
+  const remove = value => {
+    stats = stats.filter(target => target.id !== value.id)
+    return onChange(stats)
+  }
+  const upsert = value => {
+    let existed = false
+    stats = stats.map(target => (target.id === value.id ? ((existed = true), value) : target))
+    if (!existed) stats = [value, ...stats]
+    return onChange(stats)
+  }
+  subscription.on('create', upsert)
+  subscription.on('update', upsert)
+  subscription.on('enter', upsert)
+  subscription.on('leave', remove)
+  subscription.on('delete', remove)
+  return () => {
+    subscription.off('create', upsert)
+    subscription.off('update', upsert)
+    subscription.off('enter', upsert)
+    subscription.off('leave', remove)
+    subscription.off('delete', remove)
   }
 }
 
@@ -70,15 +77,6 @@ var app = new Vue({
       handler: function (id) {
         if (id) {
           this.fetchTodos(id)
-          LiveReload.login(id).then(function(client) {
-            return client.getConversation('58b8de7444d904006bee4ded')
-          }).then(function(conversation) {
-            conversation.on('message', function() {
-              if (Date.now() < this.lastReloadTime + 1000) return;
-              this.fetchTodos(id)
-              this.lastReloadTime = Date.now();
-            }.bind(this))
-          }.bind(this))
         } else {
           this.todos = []
         }
@@ -120,14 +118,14 @@ var app = new Vue({
   // note there's no DOM manipulation here at all.
   methods: {
     fetchTodos: function(id) {
-      return new AV.Query(Todo)
+      const query = new AV.Query(Todo)
         .equalTo('user', AV.Object.createWithoutData('User', id))
         .descending('createdAt')
-        .find()
-        .then(function(todos) {
-          this.todos = todos.map(function(todo) {
-            return todo.toJSON()
-          })
+      const updateTodos = this.updateTodos.bind(this)
+      return AV.Promise.all([query.find().then(updateTodos), query.subscribe()])
+        .then(function([todos, subscription]) {
+          this.subscription = subscription
+          this.unbind = bind(subscription, todos, updateTodos)
         }.bind(this))
         .catch(alert)
     },
@@ -149,7 +147,15 @@ var app = new Vue({
     logout: function() {
       AV.User.logOut()
       this.user = null
-      LiveReload.logout()
+      this.subscription.unsubscribe()
+      this.unbind()
+    },
+    
+    updateTodos: function(todos) {
+      this.todos = todos.map(function(todo) {
+        return todo.toJSON()
+      })
+      return todos
     },
     
     addTodo: function () {
