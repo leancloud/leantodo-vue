@@ -1,12 +1,14 @@
-AV.init({
+const lcApp = new LC.App({
   appId: 'ozewwcwsyq92g2hommuxqrqzg6847wgl8dtrac6suxzko333',
   appKey: 'ni0kwg7h8hwtz6a7dw9ipr7ayk989zo5y8t0sn5gjiel6uav',
+  serverURL: 'https://ozewwcws.lc-cn-n1-shared.com',
 })
-
-var Todo = AV.Object.extend('Todo')
+const db = new LC.Storage(lcApp)
+const Todo = db.class('Todo')
+const User = db.class('_User')
 
 // visibility filters
-var filters = {
+const filters = {
   all: function (todos) {
     return todos
   },
@@ -22,7 +24,7 @@ var filters = {
   }
 }
 
-var bind = (subscription, initialStats, onChange) => {
+const bind = (subscription, initialStats, onChange) => {
   let stats = [...initialStats]
   const remove = value => {
     stats = stats.filter(target => target.id !== value.id)
@@ -49,7 +51,7 @@ var bind = (subscription, initialStats, onChange) => {
 }
 
 // app Vue instance
-var app = new Vue({
+const app = new Vue({
   // app initial state
   data: {
     todos: [],
@@ -60,9 +62,9 @@ var app = new Vue({
     password: '',
     user: null
   },
-  
+
   created: function() {
-    var user = AV.User.current()
+    const user = User.current()
     if (user) {
       // user.isAuthenticated().then(function(authenticated) {
       //   if (authenticated) {
@@ -98,12 +100,10 @@ var app = new Vue({
         return this.remaining === 0
       },
       set: function (done) {
-        AV.Object.saveAll(
-          filters[done ? 'active' : 'completed'](this.todos).map(function(todo) {
-            todo.done = done
-            return AV.Object.createWithoutData('Todo', todo.objectId).set('done', done)
-          })
-        )
+        filters[done ? 'active' : 'completed'](this.todos).map(function(todo) {
+          todo.done = done
+          return Todo.object(todo.objectId).update({ done })
+        })
       }
     }
   },
@@ -118,11 +118,9 @@ var app = new Vue({
   // note there's no DOM manipulation here at all.
   methods: {
     fetchTodos: function(id) {
-      const query = new AV.Query(Todo)
-        .equalTo('user', AV.Object.createWithoutData('User', id))
-        .descending('createdAt')
+      const query = Todo.where('user', '==', User.object(id)).orderBy('createdAt', 'desc')
       const updateTodos = this.updateTodos.bind(this)
-      return AV.Promise.all([query.find().then(updateTodos), query.subscribe()])
+      return Promise.all([query.find().then(updateTodos), query.subscribe()])
         .then(function([todos, subscription]) {
           this.subscription = subscription
           this.unbind = bind(subscription, todos, updateTodos)
@@ -131,56 +129,56 @@ var app = new Vue({
     },
 
     login: function() {
-      AV.User.logIn(this.username, this.password).then(function(user) {
+      User.logIn(this.username, this.password).then(function(user) {
         this.user = user.toJSON()
         this.username = this.password = ''
       }.bind(this)).catch(alert)
     },
-    
+
     signup: function() {
-      AV.User.signUp(this.username, this.password).then(function(user) {
+      const data = { username: this.username, password: this.password }
+      User.signUp(data).then(function(user) {
         this.user = user.toJSON()
         this.username = this.password = ''
       }.bind(this)).catch(alert)
     },
 
     logout: function() {
-      AV.User.logOut()
+      User.logOut()
       this.user = null
       this.subscription.unsubscribe()
       this.unbind()
     },
-    
+
     updateTodos: function(todos) {
       this.todos = todos.map(function(todo) {
         return todo.toJSON()
       })
       return todos
     },
-    
+
     addTodo: function () {
-      var value = this.newTodo && this.newTodo.trim()
+      const value = this.newTodo && this.newTodo.trim()
       if (!value) {
         return
       }
-      var acl = new AV.ACL()
-      acl.setPublicReadAccess(false)
-      acl.setPublicWriteAccess(false)
-      acl.setReadAccess(AV.User.current(), true)
-      acl.setWriteAccess(AV.User.current(), true)
-      new Todo({
+      const acl = new LC.ACL()
+      acl.allow(User.current(), 'read')
+      acl.allow(User.current(), 'write')
+      Todo.add({
         content: value,
         done: false,
-        user: AV.User.current()
-      }).setACL(acl).save().then(function(todo) {
+        user: User.current(),
+        ACL: acl,
+      }).then(function(todo) {
         this.todos.push(todo.toJSON())
       }.bind(this)).catch(alert)
       this.newTodo = ''
     },
 
     removeTodo: function (todo) {
-      AV.Object.createWithoutData('Todo', todo.objectId)
-        .destroy()
+      Todo.object(todo.objectId)
+        .delete()
         .then(function() {
           this.todos.splice(this.todos.indexOf(todo), 1)
         }.bind(this))
@@ -195,7 +193,7 @@ var app = new Vue({
     doneEdit: function (todo) {
       this.editedTodo = null
       todo.content = todo.content.trim()
-      AV.Object.createWithoutData('Todo', todo.objectId).save({
+      Todo.object(todo.objectId).update({
         content: todo.content,
         done: todo.done
       }).catch(alert)
@@ -210,8 +208,8 @@ var app = new Vue({
     },
 
     removeCompleted: function () {
-      AV.Object.destroyAll(filters.completed(this.todos).map(function(todo) {
-        return AV.Object.createWithoutData('Todo', todo.objectId)
+      Promise.all(filters.completed(this.todos).map(function(todo) {
+        return Todo.object(todo.objectId).delete()
       })).then(function() {
         this.todos = filters.active(this.todos)
       }.bind(this)).catch(alert)
@@ -232,7 +230,7 @@ var app = new Vue({
 
 // handle routing
 function onHashChange () {
-  var visibility = window.location.hash.replace(/#\/?/, '')
+  const visibility = window.location.hash.replace(/#\/?/, '')
   if (filters[visibility]) {
     app.visibility = visibility
   } else {
