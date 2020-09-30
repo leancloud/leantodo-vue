@@ -8,43 +8,15 @@ const Todo = LC.CLASS("Todo");
 
 // visibility filters
 const filters = {
-  all: function (todos) {
+  all(todos) {
     return todos;
   },
-  active: function (todos) {
+  active(todos) {
     return todos.filter((todo) => !todo.done);
   },
-  completed: function (todos) {
+  completed(todos) {
     return todos.filter((todo) => todo.done);
   },
-};
-
-const bind = (subscription, initialStats, onChange) => {
-  let stats = [...initialStats];
-  const remove = (value) => {
-    stats = stats.filter((target) => target.id !== value.id);
-    return onChange(stats);
-  };
-  const upsert = (value) => {
-    let existed = false;
-    stats = stats.map((target) =>
-      target.id === value.id ? ((existed = true), value) : target
-    );
-    if (!existed) stats = [value, ...stats];
-    return onChange(stats);
-  };
-  subscription.on("create", upsert);
-  subscription.on("update", upsert);
-  subscription.on("enter", upsert);
-  subscription.on("leave", remove);
-  subscription.on("delete", remove);
-  return () => {
-    subscription.off("create", upsert);
-    subscription.off("update", upsert);
-    subscription.off("enter", upsert);
-    subscription.off("leave", remove);
-    subscription.off("delete", remove);
-  };
 };
 
 // app Vue instance
@@ -52,61 +24,42 @@ const app = new Vue({
   // app initial state
   data: {
     todos: [],
-    newTodo: "",
-    editedTodo: null,
+    content: "",
+    editingId: null,
+    editingContent: "",
     visibility: "all",
     username: "",
     password: "",
     user: null,
   },
 
-  created: function () {
-    const user = LC.User.current();
-    if (user) {
-      // user.isAuthenticated().then(function(authenticated) {
-      //   if (authenticated) {
-      this.user = user.toJSON();
-      //   }
-      // }.bind(this))
+  mounted() {
+    onHashChange();
+    if (LC.User.current()) {
+      this.user = LC.User.current().toJSON();
+      this.fetchTodos();
     }
   },
 
-  watch: {
-    "user.objectId": {
-      handler: function (id) {
-        if (id) {
-          this.fetchTodos(id);
-        } else {
-          this.todos = [];
-        }
-      },
-    },
+  beforeDestroy() {
+    if (this.unbind) {
+      this.unbind();
+    }
   },
 
   // computed properties
   // https://vuejs.org/guide/computed.html
   computed: {
-    filteredTodos: function () {
+    filteredTodos() {
       return filters[this.visibility](this.todos);
     },
-    remaining: function () {
+    remaining() {
       return filters.active(this.todos).length;
-    },
-    allDone: {
-      get: function () {
-        return this.remaining === 0;
-      },
-      set: function (done) {
-        filters[done ? "active" : "completed"](this.todos).map(function (todo) {
-          todo.done = done;
-          return Todo.object(todo.objectId).update({ done });
-        });
-      },
     },
   },
 
   filters: {
-    pluralize: function (n) {
+    pluralize(n) {
       return n === 1 ? "item" : "items";
     },
   },
@@ -114,129 +67,169 @@ const app = new Vue({
   // methods that implement data logic.
   // note there's no DOM manipulation here at all.
   methods: {
-    fetchTodos: function (id) {
-      const query = Todo.where("user", "==", LC.User.object(id)).orderBy(
+    upsertTodo(todo) {
+      for (let i = 0; i < this.todos.length; i++) {
+        if (this.todos[i].objectId === todo.objectId) {
+          this.$set(this.todos, i, todo);
+          return;
+        }
+      }
+      this.todos.unshift(todo);
+    },
+
+    removeTodo(todo) {
+      for (let i = 0; i < this.todos.length; i++) {
+        if (this.todos[i].objectId === todo.objectId) {
+          this.$delete(this.todos, i);
+          break;
+        }
+      }
+    },
+
+    handleCreateTodo() {
+      const content = this.content.trim();
+      if (!content) return;
+      this.content = "";
+
+      this.createTodoObject(content).then((todoObject) => {
+        this.upsertTodo({ objectId: todoObject.id, done: false, content });
+      });
+    },
+
+    handleEditTodo(todo) {
+      this.editingId = todo.objectId;
+      this.editingContent = todo.content;
+    },
+
+    handleFinishEditTodo(todo) {
+      this.editingId = null;
+      const content = this.editingContent.trim();
+      if (content === todo.content) {
+        return;
+      }
+      if (content) {
+        todo.content = content;
+        this.upsertTodo(todo);
+        this.updateTodoObject(todo.objectId, { content: todo.content });
+      } else {
+        this.removeTodo(todo);
+        this.removeTodoObject(todo.objectId);
+      }
+    },
+
+    handleToggleDone(todo) {
+      this.upsertTodo(todo);
+      this.updateTodoObject(todo.objectId, { done: todo.done });
+    },
+
+    handleRemoveTodo(todo) {
+      this.removeTodo(todo);
+      this.removeTodoObject(todo.objectId);
+    },
+
+    handleRemoveCompleted() {
+      const completed = filters.completed(this.todos);
+      this.todos = filters.active(this.todos);
+      this.removeTodoObject(completed.map((todo) => todo.objectId));
+    },
+
+    handleSignUp() {
+      const userData = { username: this.username, password: this.password };
+      LC.User.signUp(userData)
+        .then((user) => {
+          this.user = user.toJSON();
+          this.username = "";
+          this.password = "";
+        })
+        .catch(displayError);
+    },
+
+    handleLogin() {
+      LC.User.login(this.username, this.password)
+        .then((user) => {
+          this.user = user.toJSON();
+          this.username = "";
+          this.password = "";
+          this.fetchTodos();
+        })
+        .catch(displayError);
+    },
+
+    handleLogout() {
+      LC.User.logOut();
+      this.user = null;
+      if (this.unbind) {
+        this.unbind();
+      }
+    },
+
+    async fetchTodos() {
+      const query = Todo.where("user", "==", LC.User.current()).orderBy(
         "createdAt",
         "desc"
       );
-      const updateTodos = this.updateTodos.bind(this);
-      return Promise.all([query.find().then(updateTodos), query.subscribe()])
-        .then(
-          function ([todos, subscription]) {
-            this.subscription = subscription;
-            this.unbind = bind(subscription, todos, updateTodos);
-          }.bind(this)
-        )
-        .catch(alert);
-    },
+      try {
+        const todoObjects = await query.find();
+        this.todos = todoObjects.map((todoObj) => todoObj.toJSON());
 
-    login: function () {
-      LC.User.login(this.username, this.password)
-        .then(
-          function (user) {
-            this.user = user.toJSON();
-            this.username = this.password = "";
-          }.bind(this)
-        )
-        .catch(alert);
-    },
-
-    signup: function () {
-      const data = { username: this.username, password: this.password };
-      LC.User.signUp(data)
-        .then(
-          function (user) {
-            this.user = user.toJSON();
-            this.username = this.password = "";
-          }.bind(this)
-        )
-        .catch(alert);
-    },
-
-    logout: function () {
-      LC.User.logOut();
-      this.user = null;
-      this.subscription.unsubscribe();
-      this.unbind();
-    },
-
-    updateTodos: function (todos) {
-      this.todos = todos.map(function (todo) {
-        return todo.toJSON();
-      });
-      return todos;
-    },
-
-    addTodo: function () {
-      const value = this.newTodo && this.newTodo.trim();
-      if (!value) {
-        return;
+        if (this.unbind) {
+          return;
+        }
+        const liveQuery = await query.subscribe();
+        const upsert = (todoObject) => this.upsertTodo(todoObject.toJSON());
+        const remove = (todoObject) => this.removeTodo(todoObject.toJSON());
+        liveQuery.on("create", upsert);
+        liveQuery.on("update", upsert);
+        liveQuery.on("enter", upsert);
+        liveQuery.on("leave", remove);
+        liveQuery.on("delete", remove);
+        this.unbind = () => {
+          liveQuery.off("create", upsert);
+          liveQuery.off("update", upsert);
+          liveQuery.off("enter", upsert);
+          liveQuery.off("leave", remove);
+          liveQuery.off("delete", remove);
+          liveQuery.unsubscribe();
+        };
+      } catch (error) {
+        displayError(error);
       }
+    },
+
+    async createTodoObject(content) {
       const acl = new LC.ACL();
       acl.allow(LC.User.current(), "read");
       acl.allow(LC.User.current(), "write");
-      Todo.add({
-        content: value,
-        done: false,
-        user: LC.User.current(),
-        ACL: acl,
-      })
-        .then(
-          function (todo) {
-            this.todos.push(todo.toJSON());
-          }.bind(this)
-        )
-        .catch(alert);
-      this.newTodo = "";
-    },
-
-    removeTodo: function (todo) {
-      Todo.object(todo.objectId)
-        .delete()
-        .then(
-          function () {
-            this.todos.splice(this.todos.indexOf(todo), 1);
-          }.bind(this)
-        )
-        .catch(alert);
-    },
-
-    editTodo: function (todo) {
-      this.beforeEditCache = todo.content;
-      this.editedTodo = todo;
-    },
-
-    doneEdit: function (todo) {
-      this.editedTodo = null;
-      todo.content = todo.content.trim();
-      Todo.object(todo.objectId)
-        .update({
-          content: todo.content,
-          done: todo.done,
-        })
-        .catch(alert);
-      if (!todo.content) {
-        this.removeTodo(todo);
+      try {
+        return await Todo.add({
+          content,
+          done: false,
+          ACL: acl,
+          user: LC.User.current(),
+        });
+      } catch (error) {
+        displayError(error);
       }
     },
 
-    cancelEdit: function (todo) {
-      this.editedTodo = null;
-      todo.content = this.beforeEditCache;
+    async updateTodoObject(objectId, { content, done } = {}) {
+      try {
+        await Todo.object(objectId).update({ content, done });
+      } catch (error) {
+        displayError(error);
+      }
     },
 
-    removeCompleted: function () {
-      Promise.all(
-        filters.completed(this.todos).map(function (todo) {
-          return Todo.object(todo.objectId).delete();
-        })
-      )
-        .then(
-          function () {
-            this.todos = filters.active(this.todos);
-          }.bind(this)
-        )
-        .catch(alert);
+    async removeTodoObject(objectId) {
+      try {
+        if (Array.isArray(objectId)) {
+          await Promise.all(objectId.map((id) => Todo.object(id).delete()));
+        } else {
+          await Todo.object(objectId).delete();
+        }
+      } catch (error) {
+        displayError(error);
+      }
     },
   },
 
@@ -252,19 +245,28 @@ const app = new Vue({
   },
 });
 
-// handle routing
+function displayError(error) {
+  console.error(error);
+  if (error instanceof Error) {
+    if (error.error) {
+      alert(error.error); // API Error
+    } else {
+      alert(error.message);
+    }
+  }
+}
+
 function onHashChange() {
   const visibility = window.location.hash.replace(/#\/?/, "");
   if (filters[visibility]) {
     app.visibility = visibility;
   } else {
-    window.location.hash = "";
     app.visibility = "all";
+    window.location.hash = "";
   }
 }
 
 window.addEventListener("hashchange", onHashChange);
-onHashChange();
 
 // mount
 app.$mount(".todoapp");
