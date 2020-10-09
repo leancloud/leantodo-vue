@@ -8,15 +8,9 @@ const Todo = LC.CLASS('Todo');
 
 // visibility filters
 const filters = {
-  all(todos) {
-    return todos;
-  },
-  active(todos) {
-    return todos.filter((todo) => !todo.done);
-  },
-  completed(todos) {
-    return todos.filter((todo) => todo.done);
-  },
+  all: (todos) => todos,
+  active: (todos) => todos.filter((todo) => !todo.done),
+  completed: (todos) => todos.filter((todo) => todo.done),
 };
 
 // app Vue instance
