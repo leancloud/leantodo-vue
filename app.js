@@ -1,10 +1,10 @@
 LC.init({
-  appId: "ozewwcwsyq92g2hommuxqrqzg6847wgl8dtrac6suxzko333",
-  appKey: "ni0kwg7h8hwtz6a7dw9ipr7ayk989zo5y8t0sn5gjiel6uav",
-  serverURL: "https://ozewwcws.lc-cn-n1-shared.com",
+  appId: 'ozewwcwsyq92g2hommuxqrqzg6847wgl8dtrac6suxzko333',
+  appKey: 'ni0kwg7h8hwtz6a7dw9ipr7ayk989zo5y8t0sn5gjiel6uav',
+  serverURL: 'https://ozewwcws.lc-cn-n1-shared.com',
 });
 
-const Todo = LC.CLASS("Todo");
+const Todo = LC.CLASS('Todo');
 
 // visibility filters
 const filters = {
@@ -24,12 +24,12 @@ const app = new Vue({
   // app initial state
   data: {
     todos: [],
-    content: "",
+    content: '',
     editingId: null,
-    editingContent: "",
-    visibility: "all",
-    username: "",
-    password: "",
+    editingContent: '',
+    visibility: 'all',
+    username: '',
+    password: '',
     user: null,
   },
 
@@ -60,7 +60,7 @@ const app = new Vue({
 
   filters: {
     pluralize(n) {
-      return n === 1 ? "item" : "items";
+      return n === 1 ? 'item' : 'items';
     },
   },
 
@@ -89,7 +89,7 @@ const app = new Vue({
     handleCreateTodo() {
       const content = this.content.trim();
       if (!content) return;
-      this.content = "";
+      this.content = '';
 
       this.createTodoObject(content).then((todoObject) => {
         this.upsertTodo({ objectId: todoObject.id, done: false, content });
@@ -138,8 +138,8 @@ const app = new Vue({
       LC.User.signUp(userData)
         .then((user) => {
           this.user = user.toJSON();
-          this.username = "";
-          this.password = "";
+          this.username = '';
+          this.password = '';
         })
         .catch(displayError);
     },
@@ -148,8 +148,8 @@ const app = new Vue({
       LC.User.login(this.username, this.password)
         .then((user) => {
           this.user = user.toJSON();
-          this.username = "";
-          this.password = "";
+          this.username = '';
+          this.password = '';
           this.fetchTodos();
         })
         .catch(displayError);
@@ -164,9 +164,9 @@ const app = new Vue({
     },
 
     async fetchTodos() {
-      const query = Todo.where("user", "==", LC.User.current()).orderBy(
-        "createdAt",
-        "desc"
+      const query = Todo.where('user', '==', LC.User.current()).orderBy(
+        'createdAt',
+        'desc'
       );
       try {
         const todoObjects = await query.find();
@@ -178,17 +178,17 @@ const app = new Vue({
         const liveQuery = await query.subscribe();
         const upsert = (todoObject) => this.upsertTodo(todoObject.toJSON());
         const remove = (todoObject) => this.removeTodo(todoObject.toJSON());
-        liveQuery.on("create", upsert);
-        liveQuery.on("update", upsert);
-        liveQuery.on("enter", upsert);
-        liveQuery.on("leave", remove);
-        liveQuery.on("delete", remove);
+        liveQuery.on('create', upsert);
+        liveQuery.on('update', upsert);
+        liveQuery.on('enter', upsert);
+        liveQuery.on('leave', remove);
+        liveQuery.on('delete', remove);
         this.unbind = () => {
-          liveQuery.off("create", upsert);
-          liveQuery.off("update", upsert);
-          liveQuery.off("enter", upsert);
-          liveQuery.off("leave", remove);
-          liveQuery.off("delete", remove);
+          liveQuery.off('create', upsert);
+          liveQuery.off('update', upsert);
+          liveQuery.off('enter', upsert);
+          liveQuery.off('leave', remove);
+          liveQuery.off('delete', remove);
           liveQuery.unsubscribe();
         };
       } catch (error) {
@@ -198,8 +198,8 @@ const app = new Vue({
 
     async createTodoObject(content) {
       const acl = new LC.ACL();
-      acl.allow(LC.User.current(), "read");
-      acl.allow(LC.User.current(), "write");
+      acl.allow(LC.User.current(), 'read');
+      acl.allow(LC.User.current(), 'write');
       try {
         return await Todo.add({
           content,
@@ -237,7 +237,7 @@ const app = new Vue({
   // before focusing on the input field.
   // https://vuejs.org/guide/custom-directive.html
   directives: {
-    "todo-focus": function (el, value) {
+    'todo-focus': function (el, value) {
       if (value) {
         el.focus();
       }
@@ -257,16 +257,16 @@ function displayError(error) {
 }
 
 function onHashChange() {
-  const visibility = window.location.hash.replace(/#\/?/, "");
+  const visibility = window.location.hash.replace(/#\/?/, '');
   if (filters[visibility]) {
     app.visibility = visibility;
   } else {
-    app.visibility = "all";
-    window.location.hash = "";
+    app.visibility = 'all';
+    window.location.hash = '';
   }
 }
 
-window.addEventListener("hashchange", onHashChange);
+window.addEventListener('hashchange', onHashChange);
 
 // mount
-app.$mount(".todoapp");
+app.$mount('.todoapp');
