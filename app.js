@@ -1,10 +1,10 @@
-LC.init({
+AV.init({
   appId: 'ozewwcwsyq92g2hommuxqrqzg6847wgl8dtrac6suxzko333',
   appKey: 'ni0kwg7h8hwtz6a7dw9ipr7ayk989zo5y8t0sn5gjiel6uav',
   serverURL: 'https://ozewwcws.lc-cn-n1-shared.com',
 });
 
-const Todo = LC.CLASS('Todo');
+const Todo = AV.Object.extend('Todo');
 
 // visibility filters
 const filters = {
@@ -29,8 +29,8 @@ const app = new Vue({
 
   mounted() {
     onHashChange();
-    if (LC.User.current()) {
-      this.user = LC.User.current().toJSON();
+    if (AV.User.current()) {
+      this.user = AV.User.current().toJSON();
       this.fetchTodos();
     }
   },
@@ -128,8 +128,7 @@ const app = new Vue({
     },
 
     handleSignUp() {
-      const userData = { username: this.username, password: this.password };
-      LC.User.signUp(userData)
+      AV.User.signUp(this.username, this.password)
         .then((user) => {
           this.user = user.toJSON();
           this.username = '';
@@ -139,7 +138,7 @@ const app = new Vue({
     },
 
     handleLogin() {
-      LC.User.login(this.username, this.password)
+      AV.User.logIn(this.username, this.password)
         .then((user) => {
           this.user = user.toJSON();
           this.username = '';
@@ -150,7 +149,7 @@ const app = new Vue({
     },
 
     handleLogout() {
-      LC.User.logOut();
+      AV.User.logOut();
       this.user = null;
       if (this.unbind) {
         this.unbind();
@@ -158,10 +157,9 @@ const app = new Vue({
     },
 
     async fetchTodos() {
-      const query = Todo.where('user', '==', LC.User.current()).orderBy(
-        'createdAt',
-        'desc'
-      );
+      const query = new AV.Query(Todo)
+        .equalTo('user', AV.User.current())
+        .descending('createdAt');
       try {
         const todoObjects = await query.find();
         this.todos = todoObjects.map((todoObj) => todoObj.toJSON());
@@ -191,16 +189,17 @@ const app = new Vue({
     },
 
     async createTodoObject(content) {
-      const acl = new LC.ACL();
-      acl.allow(LC.User.current(), 'read');
-      acl.allow(LC.User.current(), 'write');
+      const acl = new AV.ACL();
+      acl.setReadAccess(AV.User.current(), true);
+      acl.setWriteAccess(AV.User.current(), true);
       try {
-        return await Todo.add({
+        const todo = new Todo({
           content,
           done: false,
-          ACL: acl,
-          user: LC.User.current(),
+          user: AV.User.current(),
         });
+        todo.setACL(acl);
+        return todo.save();
       } catch (error) {
         displayError(error);
       }
@@ -208,7 +207,8 @@ const app = new Vue({
 
     async updateTodoObject(objectId, { content, done } = {}) {
       try {
-        await Todo.object(objectId).update({ content, done });
+        const todo = AV.Object.createWithoutData('Todo', objectId);
+        await todo.save({ content, done });
       } catch (error) {
         displayError(error);
       }
@@ -217,9 +217,13 @@ const app = new Vue({
     async removeTodoObject(objectId) {
       try {
         if (Array.isArray(objectId)) {
-          await Promise.all(objectId.map((id) => Todo.object(id).delete()));
+          const todos = objectId.map((id) =>
+            AV.Object.createWithoutData('Todo', id)
+          );
+          await AV.Object.destroyAll(todos);
         } else {
-          await Todo.object(objectId).delete();
+          const todo = AV.Object.createWithoutData('Todo', objectId);
+          await todo.destroy();
         }
       } catch (error) {
         displayError(error);
